@@ -3,7 +3,7 @@
 """
 Functions to interact with the CasJobsRestAPI
 """
-
+import platform
 import asyncio
 import time
 
@@ -12,7 +12,7 @@ import pandas
 from IPython import get_ipython
 import nest_asyncio
 
-from . import Authentication, Config
+from . import Authentication
 
 from .utils import __token
 from .utils import __get_taskname
@@ -167,12 +167,15 @@ def executeQueryAsync(
     if isinstance(sql, str):
         sql = [sql]
     #
+    if platform.system() == "Windows":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    #
     if get_ipython() and hasattr(get_ipython(), "kernel"):
         nest_asyncio.apply()
     #
     responses = asyncio.run(
         __async_post_request(
-            url=Config.CasJobsRESTUri + "/contexts/" + context + "/query",
+            url="/CasJobs/RestApi/contexts/" + context + "/query",
             datas=sql,
             headers=__get_headers(__token(), accept_format="json"),
             task_name=__get_taskname(TASKNAMES.EXECUTEQUERY),

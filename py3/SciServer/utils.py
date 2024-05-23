@@ -6,7 +6,7 @@ from io import StringIO, BytesIO
 import asyncio
 
 import aiohttp
-import ujson
+import orjson
 import requests
 import pandas
 
@@ -90,13 +90,16 @@ def __format_to_accept_header(accept_format) -> str:
 
 
 def __format_data(sql, task_name):
-    return ujson.dumps(
-        {CASJOBSCONST.QUERY: sql, CASJOBSCONST.TASKNAME: task_name}
-    ).encode()
+    return orjson.dumps(
+        {
+            CASJOBSCONST.QUERY: sql,
+            CASJOBSCONST.TASKNAME: task_name,
+        }
+    )
 
 
 def __response_to_json(response):
-    return ujson.loads(response.content.decode())
+    return orjson.loads(response.content.decode())
 
 
 def __validate_response_status(response, on_error):
@@ -120,7 +123,7 @@ def __response_get(url: str, token, on_error: str):
     Executes the a request get for the url with headers defined
     from utils.__get_headers (these are the x_auth and content type).
     Will also validate the response and return the response as a json,
-    using the ujson library.
+    using the orjson library.
 
     :return: The result is a json object
     :raises: Throws an exception if the user is not logged into SciServer
@@ -138,7 +141,7 @@ def __parse_post(response, format):  # pylint: disable=redefined-builtin
     if format in ("readable", "StringIO"):
         return StringIO(response.content.decode())
     if format == "pandas":
-        r = ujson.loads(response.content.decode())
+        r = orjson.loads(response.content.decode())
         if len(r["Result"]) > 1:
             res = []
             for result in r["Result"]:
@@ -154,7 +157,7 @@ def __parse_post(response, format):  # pylint: disable=redefined-builtin
     if format in ("csv", "json"):
         return response.content.decode()
     if format == "dict":
-        return ujson.loads(response.content.decode())
+        return orjson.loads(response.content.decode())
     if format in ("fits", "BytesIO"):
         return BytesIO(response.content)
 
@@ -168,7 +171,7 @@ async def __async_validate_response_status(response):
                 EXCEPT.EXECUTE_QUERY_ERROR,
                 EXCEPT.HTTP_ERROR.replace(
                     DCONST.HTTP_CODE_ID,
-                    response.status,
+                    str(response.status),
                 ),
                 await response.text(),
             )
@@ -178,11 +181,29 @@ async def __async_validate_response_status(response):
 async def __make_post_request(_session, url, data, task_name):
     async with _session.post(url, data=__format_data(data, task_name)) as resp:
         await __async_validate_response_status(resp)
-        return await resp.json()
+        response_json = await resp.json()
+        output = []
+        for response in response_json["Result"]:
+            output.append(
+                {
+                    "Columns": response["Columns"],
+                    "Data": response["Data"],
+                }
+            )
+        return output
 
 
 async def __async_post_request(url, datas, headers, task_name):
-    async with aiohttp.ClientSession(headers=headers) as _session:
+    #
+    # resolver = aiodns.DNSResolver()
+    connector = aiohttp.TCPConnector(limit=0)
+    #
+    async with aiohttp.ClientSession(
+        base_url=Config.SkyServerWSurl,
+        headers=headers,
+        connector=connector,
+        json_serialize=orjson.loads,
+    ) as _session:
         tasks = [
             __make_post_request(
                 _session,
